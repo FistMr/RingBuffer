@@ -1,5 +1,8 @@
 package com.puchkov;
 
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 public class RingBuffer<T> {
     private final T[] buffer;
     private final int capacity;
@@ -7,6 +10,8 @@ public class RingBuffer<T> {
     private int start = 0;
     private int end = 0;
     private int count = 0;
+
+    private final Lock lock = new ReentrantLock();
 
     @SuppressWarnings("unchecked")
     public RingBuffer(int capacity) {
@@ -21,57 +26,87 @@ public class RingBuffer<T> {
         if (item == null) {
             throw new NullPointerException("Item cannot be null");
         }
-        buffer[start] = item;
-        if (isFull()) {
-            end = (end + 1) % capacity;
-        } else {
-            count++;
+        lock.lock();
+        try {
+            buffer[start] = item;
+            if (isFull()) {
+                end = (end + 1) % capacity;
+            } else {
+                count++;
+            }
+            start = (start + 1) % capacity;
+        } finally {
+            lock.unlock();
         }
-        start = (start + 1) % capacity;
-
     }
 
 
     public T get() {
-        if (isEmpty()) {
-            return null;
+        lock.lock();
+        try {
+            if (isEmpty()) {
+                return null;
+            }
+            T item = buffer[end];
+            buffer[end] = null;
+            end = (end + 1) % capacity;
+            count--;
+            return item;
+        } finally {
+            lock.unlock();
         }
-        T item = buffer[end];
-        buffer[end] = null;
-        end = (end + 1) % capacity;
-        count--;
-        return item;
+
     }
 
 
     public int size() {
-        return count;
+        lock.lock();
+        try {
+            return count;
+        } finally {
+            lock.unlock();
+        }
     }
 
 
     public boolean isEmpty() {
-        return count == 0;
+        lock.lock();
+        try {
+            return count == 0;
+        } finally {
+            lock.unlock();
+        }
     }
 
     public boolean isFull() {
-        return count == capacity;
+        lock.lock();
+        try {
+            return count == capacity;
+        } finally {
+            lock.unlock();
+        }
     }
 
     @Override
     public String toString() {
-        if (isEmpty()) {
-            return "[]";
-        }
-        StringBuilder sb = new StringBuilder("[");
-        int current = end;
-        for (int i = 0; i < count; i++) {
-            sb.append(buffer[current]);
-            if (i < count - 1) {
-                sb.append(", ");
+        lock.lock();
+        try {
+            if (isEmpty()) {
+                return "[]";
             }
-            current = (current + 1) % capacity;
+            StringBuilder sb = new StringBuilder("[");
+            int current = end;
+            for (int i = 0; i < count; i++) {
+                sb.append(buffer[current]);
+                if (i < count - 1) {
+                    sb.append(", ");
+                }
+                current = (current + 1) % capacity;
+            }
+            sb.append("]");
+            return sb.toString();
+        } finally {
+            lock.unlock();
         }
-        sb.append("]");
-        return sb.toString();
     }
 }
