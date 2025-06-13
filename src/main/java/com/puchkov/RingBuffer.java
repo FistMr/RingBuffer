@@ -3,13 +3,14 @@ package com.puchkov;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class RingBuffer<T> {
+public class RingBuffer<T> implements AutoCloseable {
     private final T[] buffer;
     private final int capacity;
+    private volatile boolean isClosed = false;
 
     private int start = 0;
     private int end = 0;
-    private int count = 0;
+    private volatile int count = 0;
 
     private final Lock lock = new ReentrantLock();
 
@@ -22,28 +23,29 @@ public class RingBuffer<T> {
         this.buffer = (T[]) new Object[capacity];
     }
 
-    public void put(T item) {
+    public void put(T item) throws InterruptedException, BufferFullException {
         if (item == null) {
             throw new NullPointerException("Item cannot be null");
         }
-        lock.lock();
+        lock.lockInterruptibly();
         try {
-            buffer[start] = item;
+            checkIfClosed();
             if (isFull()) {
-                end = (end + 1) % capacity;
-            } else {
-                count++;
+                throw new BufferFullException("Buffer is full");
             }
+            buffer[start] = item;
             start = (start + 1) % capacity;
+            count++;
         } finally {
             lock.unlock();
         }
     }
 
 
-    public T get() {
-        lock.lock();
+    public T get() throws InterruptedException {
+        lock.lockInterruptibly();
         try {
+            checkIfClosed();
             if (isEmpty()) {
                 return null;
             }
@@ -58,33 +60,64 @@ public class RingBuffer<T> {
 
     }
 
-
-    public int size() {
-        lock.lock();
+    public T peek() throws InterruptedException {
         try {
-            return count;
+            lock.lockInterruptibly();
+            checkIfClosed();
+            if (isEmpty()) {
+                return null;
+            }
+            return buffer[end];
         } finally {
             lock.unlock();
         }
+    }
+
+    public void clear() throws InterruptedException {
+        try {
+            lock.lockInterruptibly();
+            checkIfClosed();
+
+            for (int i = 0; i < capacity; i++) {
+                buffer[i] = null;
+            }
+            start = 0;
+            end = 0;
+            count = 0;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void close() {
+        lock.lock();
+        try {
+            isClosed = true;
+            for (int i = 0; i < capacity; i++) {
+                buffer[i] = null;
+            }
+            start = 0;
+            end = 0;
+            count = 0;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public int size() {
+        return count;
     }
 
 
     public boolean isEmpty() {
-        lock.lock();
-        try {
-            return count == 0;
-        } finally {
-            lock.unlock();
-        }
+        checkIfClosed();
+        return count == 0;
     }
 
     public boolean isFull() {
-        lock.lock();
-        try {
-            return count == capacity;
-        } finally {
-            lock.unlock();
-        }
+        checkIfClosed();
+        return count == capacity;
     }
 
     @Override
@@ -107,6 +140,12 @@ public class RingBuffer<T> {
             return sb.toString();
         } finally {
             lock.unlock();
+        }
+    }
+
+    private void checkIfClosed() {
+        if (isClosed) {
+            throw new IllegalStateException("RingBuffer is closed");
         }
     }
 }
